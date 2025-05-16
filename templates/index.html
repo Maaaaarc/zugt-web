@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link id="theme-stylesheet" rel="stylesheet" href="{{ url_for('static', filename='dark-mode.css') }}">
+    <title>Train Journeys Comparison</title>
+    
+</head>
+<body>
+    
+    <button id="scrollToTopBtn" title="Scroll to top">&#9650;</button> {# Up arrow symbol #}
+    <h1>Train Journeys Comparison</h1>
+    <button id="theme-toggle" title="Toggle Theme">☀️</button>
+
+    {% if error %}
+        <div class="error-message">{{ error }}</div>
+    {% else %}
+        {# --- Filter Form --- #}
+        <form method="get" class="filter-form">
+            {# First row for primary filters #}
+            <div class="filter-row">
+
+                <label for="origin-select">Origin:</label>
+                <select id="origin-select" name="origin" {% if selected_round_trip_mode %}required{% endif %}>
+                    <option value="">Select Origin</option>
+                    {% for station in available_stations %}
+                        <option value="{{ station }}" {% if station == selected_origin %}selected{% endif %}>{{ station }}</option>
+                    {% endfor %}
+                </select>
+
+                <button type="button" class="switch-button" onclick="switchStations()">⇄ </button>
+
+
+                <label for="destination-select">Destination:</label>
+                <select id="destination-select" name="destination" {% if selected_round_trip_mode %}required{% endif %}>
+                    <option value="">Select Destination</option>
+                    {% for station in available_stations %}
+                        <option value="{{ station }}" {% if station == selected_destination %}selected{% endif %}>{{ station }}</option>
+                    {% endfor %}
+                </select>
+
+                {# --- Partial Fare Filter --- #}
+                <div class="filter-group">
+                    <input type="checkbox" id="exclude-partial-fare" name="exclude_partial_fare" {% if exclude_partial_fare %}checked{% endif %}>
+                    <label for="exclude-partial-fare">Exclude Partial Fares</label>
+                </div>
+                {# --- End Partial Fare Filter --- #}
+
+                <div class="filter-row"> {# New row for Duration Filter #}
+                    {# --- Duration Filter --- #}
+                    <div class="filter-group">
+                        <label for="exclude-duration-input">Exclude journeys over:</label>
+                        <input type="text" id="exclude-duration-input" name="exclude_duration_over" value="{{ selected_exclude_duration_over | default('', true) }}" placeholder="HH:MM">
+                    </div>
+                    {# --- End Duration Filter --- #}
+                </div>
+                {# Re-open the return-time-filter-row div structure if needed, but it's easier to give duration its own row #}
+
+
+                {# --- Price Highlight Input --- #}
+                <div class="filter-group">
+                    <label for="highlight-price-input">Highlight prices under:</label>
+                    <input type="number" id="highlight-price-input" name="highlight_price_under" value="{{ selected_highlight_price_under }}" step="0.01" min="0">
+                </div>
+                {# --- End Price Highlight Input --- #}
+
+
+
+
+
+
+
+
+                <div class="filter-row">
+
+                    <div class="filter-group">
+                        <input type="checkbox" id="round-trip-toggle" name="round_trip" {% if selected_round_trip_mode %}checked{% endif %}>
+                        <label for="round-trip-toggle">Round Trip</label>
+                    </div>
+
+
+                    <div class="filter-group">
+                        <label for="day-count-input">Nights:</label>
+                        <input type="number" id="day-count-input" name="day_count" value="{{ selected_day_count }}" min="0" {% if not selected_round_trip_mode %}disabled{% endif %}> {# Disable if not RT mode #}
+                    </div>
+
+                    <label for="processed-date-select">Processed On:</label>
+                    <select id="processed-date-select" name="processed_date">
+                        <option value="">Any Processed Date</option>
+                        {% for proc_date in unique_processed_dates_str %}
+                            <option value="{{ proc_date }}" {% if proc_date == selected_processed_date %}selected{% endif %}>{{ proc_date }}</option>
+                        {% endfor %}
+                    </select>
+
+                    <!-- After the Processed On dropdown -->
+                    <div class="filter-group" style="margin-left: 15px;">
+                        <input type="checkbox" id="exclude-past-toggle" name="exclude_past" {% if exclude_past_journeys %}checked{% endif %}>
+                        <label for="exclude-past-toggle">Hide Past Journeys</label>
+                    </div>
+
+
+
+                </div>
+
+
+
+            </div>
+
+            {# Second row for Outbound Time Filter, Partial Fare Filter, and Price Highlight Input #}
+            <div class="filter-row">
+                 {# --- Outbound Time Filter --- #}
+                 <div class="time-filter-container">
+                     <label for="time-filter-type">Outbound Time Filter:</label>
+                     <select id="time-filter-type" name="time_filter_type">
+                         <option value="" {% if selected_time_filter_type == '' %}selected{% endif %}>No Filter</option>
+                         <option value="departure" {% if selected_time_filter_type == 'departure' %}selected{% endif %}>Filter by Departure Time</option>
+                         <option value="arrival" {% if selected_time_filter_type == 'arrival' %}selected{% endif %}>Filter by Arrival Time</option>
+                     </select>
+
+                     <div id="outbound-time-inputs" class="time-filter-inputs {% if selected_time_filter_type %}visible{% endif %}">
+                         <label for="outbound-start-time">From:</label>
+                         <input type="time" id="outbound-start-time" name="outbound_start_time" value="{{ selected_outbound_start_time | default('00:00', true) }}">
+                         <label for="outbound-end-time">To:</label>
+                         <input type="time" id="outbound-end-time" name="outbound_end_time" value="{{ selected_outbound_end_time | default('23:59', true) }}">
+                     </div>
+                 </div>
+                 {# --- End Outbound Time Filter --- #}
+
+
+
+
+
+
+            </div>
+
+
+            {# Third row for Return Time Filter (conditionally visible) and Duration Filter #}
+            <div id="return-time-filter-row" class="filter-row {% if selected_round_trip_mode %}visible{% endif %}">
+                 {# --- Return Time Filter --- #}
+                 <div class="time-filter-container">
+                     <label for="return-time-filter-type">Return Time Filter:</label>
+                     <select id="return-time-filter-type" name="return_time_filter_type">
+                         <option value="" {% if selected_return_time_filter_type == '' %}selected{% endif %}>No Filter</option>
+                         <option value="departure" {% if selected_return_time_filter_type == 'departure' %}selected{% endif %}>Filter by Departure Time</option>
+                         <option value="arrival" {% if selected_return_time_filter_type == 'arrival' %}selected{% endif %}>Filter by Arrival Time</option>
+                     </select>
+
+                     <div id="return-time-inputs" class="time-filter-inputs {% if selected_return_time_filter_type %}visible{% endif %}">
+                         <label for="return-start-time">From:</label>
+                         <input type="time" id="return-start-time" name="return_start_time" value="{{ selected_return_start_time | default('00:00', true) }}">
+                         <label for="return-end-time">To:</label>
+                         <input type="time" id="return-end-time" name="return_end_time" value="{{ selected_return_end_time | default('23:59', true) }}">
+                     </div>
+                 </div>
+                 {# --- End Return Time Filter --- #}
+
+                </div> {# Close the return-time-filter-row temporarily to add duration filter in the next row #}
+
+
+
+            {# Fourth row for Submit Button #}
+            <div class="filter-row">
+                 <button type="submit">Find best Prices</button>
+            </div>
+        </form>
+    {% endif %}
+
+        {# Add a script for filter visibility toggling AND weblink generation #}
+        <script>
+            const roundTripToggle = document.getElementById('round-trip-toggle');
+            const dayCountInput = document.getElementById('day-count-input');
+            const originSelect = document.getElementById('origin-select');
+            const destinationSelect = document.getElementById('destination-select');
+
+            const outboundTimeFilterTypeSelect = document.getElementById('time-filter-type');
+            const outboundTimeInputsContainer = document.getElementById('outbound-time-inputs');
+
+            const returnTimeFilterRow = document.getElementById('return-time-filter-row');
+            const returnTimeFilterTypeSelect = document.getElementById('return-time-filter-type');
+            const returnTimeInputsContainer = document.getElementById('return-time-inputs');
+
+            // Function to update visibility of filter controls
+            function updateFilterState() {
+                const isRoundTrip = roundTripToggle.checked;
+
+                // Round Trip specific controls
+                dayCountInput.disabled = !isRoundTrip;
+                originSelect.required = isRoundTrip;
+                destinationSelect.required = isRoundTrip;
+
+                // Show/hide Return Time Filter row based on Round Trip toggle
+                if (isRoundTrip) {
+                    returnTimeFilterRow.classList.add('visible');
+                } else {
+                    returnTimeFilterRow.classList.remove('visible');
+                    // Optional: Reset return time filters when disabling RT
+                    // returnTimeFilterTypeSelect.value = "";
+                    // document.getElementById('return-start-time').value = "00:00";
+                    // document.getElementById('return-end-time').value = "23:59";
+                }
+
+                 // Show/hide Outbound time inputs based on selection
+                 const selectedOutboundTimeFilter = outboundTimeFilterTypeSelect.value;
+                 if (selectedOutboundTimeFilter) {
+                     outboundTimeInputsContainer.classList.add('visible');
+                 } else {
+                     outboundTimeInputsContainer.classList.remove('visible');
+                 }
+
+                 // Show/hide Return time inputs based on selection (only if return filter row is visible)
+                 // This is important because we don't want to see inputs if RT is off
+                 const selectedReturnTimeFilter = returnTimeFilterTypeSelect.value;
+                 if (isRoundTrip && selectedReturnTimeFilter) {
+                      returnTimeInputsContainer.classList.add('visible');
+                 } else {
+                      returnTimeInputsContainer.classList.remove('visible');
+                 }
+            }
+
+            // --- Weblink Generation Logic ---
+
+
+            // Add event listeners to all weblink buttons after the page loads
+            document.addEventListener('DOMContentLoaded', () => {
+                const weblinkButtons = document.querySelectorAll('.weblink-button');
+                weblinkButtons.forEach(button => {
+                    button.addEventListener('click', handleWeblinkClick);
+                });
+            });
+
+            async function handleWeblinkClick(event) {
+                const button = event.target;
+                const journeyId = button.dataset.journeyId; // Get journey ID from data attribute
+                const currentUrl = button.dataset.journeyUrl; // Get existing URL from data attribute
+                const refreshToken = button.dataset.refreshToken; // Get refresh token
+
+                console.log('Journey ID:', journeyId);
+                console.log('Current URL:', currentUrl);
+                console.log('Refresh Token:', refreshToken);
+
+                // Disable the button and show loading state
+                button.disabled = true;
+                button.textContent = 'Loading...'; // Show loading state
+
+                if (currentUrl && currentUrl.trim() !== '' && currentUrl !== 'None') {
+                    // Use existing URL if available and valid
+                    console.log(`Opening existing URL for journey ${journeyId}: ${currentUrl}`);
+                    window.open(currentUrl, '_blank');
+                    button.disabled = false; // Re-enable button
+                    button.textContent = 'Open Link'; // Reset text
+                } else if (refreshToken && refreshToken.trim() !== '' && refreshToken !== 'None') {
+                    // Generate URL if refresh token is available
+                    console.log(`Generating URL for journey ${journeyId} with token: ${refreshToken}`);
+                    try {
+                        // Call the backend endpoint to generate and save the URL
+                        const response = await fetch(`/generate_journey_url/${journeyId}`);
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            const generatedUrl = data.url;
+                            console.log(`Generated URL: ${generatedUrl}`);
+                            // Update the data attribute on the button with the new URL
+                            button.dataset.journeyUrl = generatedUrl;
+                            button.textContent = 'Open Link'; // Update button text
+                            // Open the generated URL in a new tab
+                            window.open(generatedUrl, '_blank');
+                            
+                        } else {
+                            console.error('Error response from backend:', data.error || response.statusText);
+                            alert('Could not generate journey link: ' + (data.error || response.statusText));
+                            button.textContent = 'Error'; // Indicate error state
+                        }
+                    } catch (error) {
+                        console.error('Fetch error:', error);
+                        alert('An error occurred while generating the link.');
+                        button.textContent = 'Error'; // Indicate error state
+                    } finally {
+                        button.disabled = false; // Re-enable button
+                    }
+                } else {
+                    // Case where neither URL nor refreshToken is available
+                    console.warn(`No URL or refreshToken available for journey ${journeyId}.`);
+                    alert('No link available for this journey.');
+                    button.disabled = false; // Re-enable button
+                    button.textContent = 'No Link'; // Indicate no link state
+                }
+            }
+
+
+
+            // Set initial filter state on page load
+            updateFilterState();
+
+            // Add event listeners to update filter state when toggles/select change
+            roundTripToggle.addEventListener('change', updateFilterState);
+            outboundTimeFilterTypeSelect.addEventListener('change', updateFilterState);
+            returnTimeFilterTypeSelect.addEventListener('change', updateFilterState);
+
+
+
+            // Clear URL hash on form submit to prevent unwanted scroll
+            document.querySelector('.filter-form').addEventListener('submit', function () {
+                history.replaceState(null, '', location.pathname + location.search);
+            });
+
+
+
+
+            //Scroll to Top Button Logic
+            // Get the button element
+            const scrollToTopBtn = document.getElementById("scrollToTopBtn");
+
+            // When the user scrolls down 100px from the top, show the button
+            window.onscroll = function() {
+                scrollFunction();
+            };
+
+            function scrollFunction() {
+                // Check scroll position (handle compatibility across browsers)
+                if (document.body.scrollTop > 100 || document.documentElement.scrollTop > 100) {
+                    scrollToTopBtn.style.display = "block"; // Show the button
+                } else {
+                    scrollToTopBtn.style.display = "none"; // Hide the button
+                }
+            }
+            
+            // When the user clicks on the button, scroll to the top of the document
+            scrollToTopBtn.addEventListener('click', function() {
+                window.scrollTo({
+                    top: 0,
+                    behavior: 'smooth' // Smooth scrolling animation
+                });
+            });
+
+            function switchStations() {
+                const originSelect = document.getElementById('origin-select');
+                const destinationSelect = document.getElementById('destination-select');
+                // Swap values
+                const temp = originSelect.value;
+                originSelect.value = destinationSelect.value;
+                destinationSelect.value = temp;
+            }
+
+        </script>
+
+
+        {# --- Calendar Overview --- #}
+        {% if monthly_calendars %}
+
+              <div class="calendar-container">
+                  {# Loop through each month's calendar data #}
+                  {% for month_cal in monthly_calendars %}
+                      {# Wrap each month's title and table in a container for flexbox #}
+                      <div class="calendar-month-container">
+                          <h3>{{ month_cal.month_name }} {{ month_cal.year }}</h3>
+                          <table class="calendar">
+                              <thead>
+                                  <tr>
+                                      {# Loop through day names (Mon, Tue, ...) #}
+                                      {% for day_name in calendar_day_names %}
+                                          <th>{{ day_name }}</th>
+                                      {% endfor %}
+                                  </tr>
+                              </thead>
+                              <tbody>
+                                  {# Loop through each week in the month #}
+                                  {% for week in month_cal.weeks %}
+                                      <tr>
+                                          {# Loop through each day cell in the week #}
+                                          {% for day_cell in week %}
+                                               {% if day_cell.day %} {# Check if it's a valid day number (not 0) #}
+                                                   {# Add the price-highlight class if the price is under the highlight threshold #}
+                                                   <td {% if day_cell.has_data %}class="has-data{% if selected_highlight_price_under is not none and day_cell.raw_amount is not none and day_cell.raw_amount is not string and day_cell.raw_amount < selected_highlight_price_under %} price-highlight{% endif %}"{% elif day_cell.day %}class="{% if selected_highlight_price_under is not none and day_cell.raw_amount is not none and day_cell.raw_amount is not string and day_cell.raw_amount < selected_highlight_price_under %} price-highlight{% endif %}"{% else %}class="empty-cell"{% endif %}>
+                                                       {% if day_cell.has_data %}
+                                                            {# If there's data, create a link #}
+                                                            {# Link to the date section in detailed view (optional but good UX) #}
+                                                            <a href="javascript:void(0);" onclick="loadJourneys('{{ day_cell.date_key }}')">
+                                                                <span class="day-num">{{ day_cell.day }}</span>
+                                                                <span class="price">{{ day_cell.price }}</span>
+                                                                {% if selected_round_trip_mode %}
+                                                                    <span class="price rt">RT</span>
+                                                                {% endif %}
+                                                            </a>
+                                                        {% else %}
+                                                            {# If no data, just display the day number #}
+                                                            <span class="day-num">{{ day_cell.day }}</span>
+                                                        {% endif %}
+                                                   </td>
+                                               {% else %}
+                                                   {# This is an empty cell for days outside the month (where monthcalendar returns 0) #}
+                                                   <td class="empty-cell"></td>
+                                               {% endif %}
+                                          {% endfor %} {# End of day cell loop #}
+                                      </tr>
+                                  {% endfor %} {# End of week loop #}
+                              </tbody>
+                          </table>
+                      </div> {# End of .calendar-month-container #}
+                  {% endfor %} {# End of month calendar loop #}
+              </div> {# End of .calendar-container #}
+
+            <hr> {# Optional separator #}
+        {% endif %} {# End of calendar block #}
+
+
+        {# --- Detailed Journeys by Departure Day --- #}
+        
+        <h2>Detailed Journeys by Departure Day</h2>
+        <div id="journeys-container">
+            <p>Click on a date in the calendar to load detailed journeys.</p>
+        </div>
+        
+        <script>
+            async function loadJourneys(date) {
+            const container = document.getElementById('journeys-container');
+            container.innerHTML = `<p>Loading journeys for ${date}...</p>`;
+
+            try {
+                const formData = new FormData(document.querySelector('.filter-form'));
+                const params = new URLSearchParams(formData);
+                
+                const response = await fetch(`/api/journeys/${date}?${params.toString()}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    let tableHtml = '';
+                    if (data.round_trip_pairs?.length > 0) {
+                        // Round trip pairs
+                        tableHtml = `
+                            <h2>Round Trip Journeys (${date})</h2>
+                            <table class="journey-table">
+                                <thead>
+                                    <tr>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
+                                        <th>Departure</th>
+                                        <th>Arrival</th>
+                                        <th>Duration</th>
+                                        <th>Price</th>
+                                        <th>Weblink</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                        
+                        data.round_trip_pairs.forEach(pair => {
+                            tableHtml += `
+                                <tr class="outbound-row">
+                                    <td>→ㅤ${pair.outbound.origin_name}</td>
+                                    <td>${pair.outbound.destination_name}</td>
+                                    <td>${formatTime(pair.outbound.start_time)}</td>
+                                    <td>${formatTime(pair.outbound.end_time)}</td>
+                                    <td>${formatDuration(pair.outbound.duration_minutes)}</td>
+                                    <td>${pair.outbound.price_amount} ${pair.outbound.price_currency}</td>
+                                    <td>${generateWeblinkButton(pair.outbound)}</td>
+                                </tr>
+                                <tr class="return-row">
+                                    <td>←ㅤ${pair.return.origin_name}</td>
+                                    <td>${pair.return.destination_name}</td>
+                                    <td>${formatTime(pair.return.start_time)}</td>
+                                    <td>${formatTime(pair.return.end_time)}</td>
+                                    <td>${formatDuration(pair.return.duration_minutes)}</td>
+                                    <td>${pair.return.price_amount} ${pair.return.price_currency}</td>
+                                    <td>${generateWeblinkButton(pair.return)}</td>
+                                </tr>`;
+                        });
+                    } 
+                    else if (data.journeys?.length > 0) {
+                        // One-way journeys
+                        tableHtml = `
+                            <h2>Journeys for ${date}</h2>
+                            <table class="journey-table">
+                                <thead>
+                                    <tr>
+                                        <th>Origin</th>
+                                        <th>Destination</th>
+                                        <th>Departure</th>
+                                        <th>Arrival</th>
+                                        <th>Duration</th>
+                                        <th>Price</th>
+                                        <th>Weblink</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
+                        
+                        data.journeys.forEach(journey => {
+                            tableHtml += `
+                                <tr>
+                                    <td>${journey.origin_name}</td>
+                                    <td>${journey.destination_name}</td>
+                                    <td>${formatTime(journey.start_time)}</td>
+                                    <td>${formatTime(journey.end_time)}</td>
+                                    <td>${formatDuration(journey.duration_minutes)}</td>
+                                    <td>${journey.price_amount} ${journey.price_currency}</td>
+                                    <td>${generateWeblinkButton(journey)}</td>
+                                </tr>`;
+                        });
+                    }
+                    
+                    tableHtml += '</tbody></table>';
+                    container.innerHTML = tableHtml;
+                    attachWeblinkButtonListeners();
+                    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                } else {
+                    container.innerHTML = `<p>Error: ${data.error || 'Unknown error'}</p>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<p>Error loading journeys: ${error.message}</p>`;
+            }
+        }
+
+        // Web link button generator (matches previous functionality)
+        function generateWeblinkButton(journey) {
+            return `
+                <button class="weblink-button" 
+                        data-journey-id="${journey.journey_id}"
+                        data-journey-url="${journey.url || ''}"
+                        data-refresh-token="${journey.refreshToken || ''}">
+                    ${journey.url ? 'Open Link' : 'Generate Link'}
+                </button>`;
+        }
+
+        // Attach click handlers to new buttons
+        function attachWeblinkButtonListeners() {
+            document.querySelectorAll('.weblink-button').forEach(button => {
+                button.addEventListener('click', handleWeblinkClick);
+            });
+        }
+
+        window.addEventListener('load', function() {
+            window.scrollTo(0, 0);
+            // For browsers that restore scroll position asynchronously
+            setTimeout(() => window.scrollTo(0, 0), 10);
+        });
+        
+
+        // Safe formatting functions
+        function safeFormatTime(timeString) {
+            try {
+                if (!timeString) return 'N/A';
+                const date = new Date(timeString);
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                console.error('Time format error:', e);
+                return 'Invalid time';
+            }
+        }
+
+        function safeFormatDuration(minutes) {
+            if (!minutes) return 'N/A';
+            const hours = Math.floor(minutes / 60);
+            const mins = minutes % 60;
+            return `${hours}h ${mins}m`;
+        }
+
+        // Temporary simple weblink generator
+        function generateSimpleWeblink(journey) {
+            return journey.url 
+                ? `<a href="${journey.url}" target="_blank" class="weblink">Book</a>`
+                : 'N/A';
+        }
+        
+            function attachWeblinkButtonListeners() {
+                const weblinkButtons = document.querySelectorAll('.weblink-button');
+                weblinkButtons.forEach(button => {
+                    button.addEventListener('click', handleWeblinkClick);
+                });
+            }
+
+
+
+            function formatTime(dateTimeString) {
+                if (!dateTimeString) {
+                    console.error('Invalid date-time string:', dateTimeString);
+                    return 'Invalid Date-Time';
+                }
+
+                try {
+                    const date = new Date(dateTimeString);
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
+                    const time = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); // 24-hour format
+                    return `${day}-${month} | ${time}`;
+                } catch (error) {
+                    console.error('Error formatting date-time:', error);
+                    return 'Invalid Date-Time';
+                }
+            }
+
+            function formatDuration(minutes) {
+                const hours = Math.floor(minutes / 60);
+                const remainingMinutes = minutes % 60;
+                return `${hours}h ${remainingMinutes}m`;
+            }
+            //console.log('Start Time:', journey.start_time);
+            //console.log('End Time:', journey.end_time);
+
+
+            // Theme Toggle Button
+            const themeToggleButton = document.getElementById('theme-toggle');
+            const themeStylesheet = document.getElementById('theme-stylesheet');
+
+            // Function to set the theme
+            function setTheme(theme) {
+                if (theme === 'light') {
+                    themeStylesheet.href = "/static/light-mode.css";
+                    localStorage.setItem('theme', 'light');
+                    themeToggleButton.textContent = '🌘'; // Moon icon for dark mode
+                } else {
+                    themeStylesheet.href = "/static/dark-mode.css";
+                    localStorage.setItem('theme', 'dark');
+                    themeToggleButton.textContent = '☀️'; // Sun icon for light mode
+                }
+            }
+
+            // Check for saved user preference, otherwise use system preference
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                setTheme(savedTheme);
+            } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+                setTheme('light');
+            } else {
+                setTheme('dark');
+            }
+            console.log("something is working")
+            // Toggle theme on button click
+            themeToggleButton.addEventListener('click', () => {
+                const currentTheme = localStorage.getItem('theme') === 'light' ? 'dark' : 'light';
+                setTheme(currentTheme);
+                console.log("Function completed.")
+            });
+        </script>    
+        
+
+
+    
+</body>
+</html>
