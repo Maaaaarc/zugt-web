@@ -1,4 +1,3 @@
-#test github
 import sqlite3
 from flask import Flask, render_template, g, request, jsonify
 from datetime import datetime, date, timedelta, time
